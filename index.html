@@ -131,7 +131,8 @@ function dmr(x, y) {
 const rel = (x, y) => dmr(x, y) - D.floor;
 
 // ---------------------------------------------------------------- scéna
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const ANDROID = /Android/.test(navigator.userAgent);
+const renderer = new THREE.WebGLRenderer({ antialias: !ANDROID, alpha: true });   // vícevzorkový XR framebuffer na části telefonů nekreslí
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
@@ -237,7 +238,7 @@ function updateRoom(cam) {
   const r = D.rooms.find((r) => inPoly(x, y, r.poly));
   const where = r ? `${r.id} ${r.name}` : (inPoly(x, y, D.outline) ? 'v domě' : (inPoly(x, y, D.parcel) ? 'na zahradě' : 'mimo pozemek'));
   const s = house.scale.y;
-  $('room').innerHTML = `${where}<small>telefon ${F(h * s)} m nad podlahou${s < 1 ? ' makety' : ''} · x ${F(x, 1)} y ${F(y, 1)}</small>`;
+  $('room').innerHTML = `${where}<small id="diag"></small><small>telefon ${F(h * s)} m nad podlahou${s < 1 ? ' makety' : ''} · x ${F(x, 1)} y ${F(y, 1)}</small>`;
 }
 
 // ---------------------------------------------------------------- přepínače
@@ -297,7 +298,27 @@ beacon.add(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 2, 8).transla
 beacon.add(new THREE.Mesh(new THREE.SphereGeometry(0.04, 16, 8).translate(0, 2, 0), new THREE.MeshBasicMaterial({ color: 0x7fc29b })));
 beacon.visible = false;
 scene.add(beacon);
-
+// zkušební kostička 0,5 m před telefonem hned po startu AR: když není vidět, telefon nekreslí 3D vůbec
+const testCube = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshNormalMaterial());
+testCube.visible = false;
+scene.add(testCube);
+let diagT = 0, calls = 0;
+const uaShort = (navigator.userAgent.match(/Android [\d.]+; ([^;)]+)/) || [, ''])[1] + ' · Chrome ' +
+  ((navigator.userAgent.match(/Chrome\/(\d+)/) || [, '?'])[1]);
+function diag(frame) {
+  const now = performance.now();
+  if (now - diagT < 400) return;
+  diagT = now;
+  let d = '';
+  if (reticle.visible) {
+    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix), c = new THREE.Vector3();
+    xrCam.getWorldPosition(c);
+    d = ` (${F(p.distanceTo(c))} m, ${F(c.y - p.y)} m pod telefonem)`;
+  }
+  const line = `kroužek ${reticle.visible ? 'ano' + d : 'ne'} · vykresleno ${calls} · ${uaShort}`;
+  if (step !== 'done') $('room').innerHTML = `Diagnostika<small>${line}</small>`;
+  else $('diag').textContent = line;
+}
 let hitSource = null, step = 'A', marks = {}, adj = { dh: 0, dth: 0 }, fit = null;
 let mode = 'site', homeMark = null, xrCam = null;      // mode: 'site' = pozemek (2 body), 'home' = zkouška doma (1 ťuknutí)
 const HOME = {
@@ -316,6 +337,7 @@ function setStep(s) {
   step = s;
   const label = s === 'A' ? 'první' : 'druhý';
   if (s === 'done') {
+    testCube.visible = false;
     $('align').classList.add('hidden');
     $('tools').classList.remove('hidden');
     return;
@@ -325,7 +347,7 @@ function setStep(s) {
   house.visible = false;
   beacon.visible = false;
   if (mode === 'home') {
-    $('msg').innerHTML = 'Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
+    $('msg').innerHTML = 'Před tebou by měla být barevná kostička – když není vidět, napiš. Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
       'Dům se postaví ulicí k tobě. ' + (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad podlahou, ať se kroužek objeví.</span>');
     $('btnMark').textContent = 'Umístit sem';
     return;
@@ -419,6 +441,8 @@ async function startAR(m) {
     return;
   }
   await loading;
+  $('ui').classList.remove('hidden');                 // overlay musí být viditelný už při startu relace
+  $('tools').classList.add('hidden');
   const session = await navigator.xr.requestSession('immersive-ar', {
     requiredFeatures: ['hit-test'],
     optionalFeatures: ['dom-overlay'],
@@ -439,7 +463,17 @@ async function startAR(m) {
   setStep('A');
   session.addEventListener('end', () => location.reload());
   xrCam = renderer.xr.getCamera();
+  let first = true;
   renderer.setAnimationLoop((t, frame) => {
+    if (frame && first) {
+      const vp = frame.getViewerPose(renderer.xr.getReferenceSpace());
+      if (vp) {
+        const m = new THREE.Matrix4().fromArray(vp.transform.matrix);
+        testCube.position.set(0, 0, -0.5).applyMatrix4(m);
+        testCube.visible = true;
+        first = false;
+      }
+    }
     if (frame && hitSource) {
       const hits = frame.getHitTestResults(hitSource);
       const was = reticle.visible;
@@ -453,6 +487,8 @@ async function startAR(m) {
     }
     if (step === 'done') updateRoom(xrCam);
     renderer.render(scene, camera);
+    calls = renderer.info.render.calls;
+    diag(frame);
   });
 }
 
