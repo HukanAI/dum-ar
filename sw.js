@@ -1,5 +1,5 @@
 // Offline cache celé aplikace (po prvním otevření funguje i bez signálu na pozemku).
-const V = 'dum-ar-v6-8';
+const V = 'dum-ar-v6-9';
 const FILES = [
   './', 'index.html', 'data.json', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'lib/three.module.js?v=7', 'lib/GLTFLoader.js?v=7', 'lib/DRACOLoader.js?v=7', 'lib/OrbitControls.js?v=7', 'lib/BufferGeometryUtils.js',

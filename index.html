@@ -298,33 +298,26 @@ beacon.add(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 2, 8).transla
 beacon.add(new THREE.Mesh(new THREE.SphereGeometry(0.04, 16, 8).translate(0, 2, 0), new THREE.MeshBasicMaterial({ color: 0x7fc29b })));
 beacon.visible = false;
 scene.add(beacon);
-// zkušební kostička 0,5 m před telefonem hned po startu AR: když není vidět, telefon nekreslí 3D vůbec
-const testCube = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshNormalMaterial());
-testCube.visible = false;
-scene.add(testCube);
-let diagT = 0, calls = 0, lastErr = '';
-// chyby vykreslování zobrazit na displeji (konzole v telefonu není vidět)
+let diagT = 0, lastErr = '';
+// chyby vykreslování ukázat na displeji (konzole v telefonu není vidět)
 const _ce = console.error.bind(console);
 console.error = (...a) => { lastErr = a.map(String).join(' ').slice(0, 160); _ce(...a); };
 addEventListener('error', (e) => { lastErr = (e.message || String(e)).slice(0, 160); });
 addEventListener('unhandledrejection', (e) => { lastErr = String(e.reason).slice(0, 160); });
-const uaShort = (navigator.userAgent.match(/Android [\d.]+; ([^;)]+)/) || [, ''])[1] + ' · Chrome ' +
-  ((navigator.userAgent.match(/Chrome\/(\d+)/) || [, '?'])[1]);
-function diag(frame) {
+function status() {
   const now = performance.now();
   if (now - diagT < 400) return;
   diagT = now;
-  let d = '';
-  if (reticle.visible) {
-    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix), c = new THREE.Vector3();
-    xrCam.getWorldPosition(c);
-    d = ` (${F(p.distanceTo(c))} m, ${F(c.y - p.y)} m pod telefonem)`;
-  }
-  const gl = renderer.getContext(), lay = renderer.xr.getSession() && renderer.xr.getSession().renderState.baseLayer;
-  const line = `kroužek ${reticle.visible ? 'ano' + d : 'ne'} · vykresleno ${calls} · vrstva ${lay ? lay.framebufferWidth + '×' + lay.framebufferHeight : (renderer.xr.getSession() && renderer.xr.getSession().renderState.layers ? 'layers' : 'žádná')}` +
-    ` · ${gl.isContextLost() ? 'GL ZTRACEN' : 'GL ok'} · oprava ${globalThis.DUM_AR_FIX ? 'ano' : 'NE'} · ${uaShort}` + (lastErr ? ` · CHYBA: ${lastErr}` : '');
-  if (step !== 'done') $('room').innerHTML = `Diagnostika<small>${line}</small>`;
-  else $('diag').textContent = line;
+  const err = lastErr ? `<span class="warn">Chyba: ${lastErr}</span>` : '';
+  if (step !== 'done') {
+    let s = 'Hledám podlahu…';
+    if (reticle.visible) {
+      const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix), c = new THREE.Vector3();
+      xrCam.getWorldPosition(c);
+      s = `Podlaha nalezena · kroužek ${F(p.distanceTo(c), 1)} m od telefonu`;
+    }
+    $('room').innerHTML = `${s}<small>${err}</small>`;
+  } else if ($('diag')) $('diag').innerHTML = err;
 }
 let hitSource = null, step = 'A', marks = {}, adj = { dh: 0, dth: 0 }, fit = null;
 let mode = 'site', homeMark = null, xrCam = null;      // mode: 'site' = pozemek (2 body), 'home' = zkouška doma (1 ťuknutí)
@@ -344,7 +337,6 @@ function setStep(s) {
   step = s;
   const label = s === 'A' ? 'první' : 'druhý';
   if (s === 'done') {
-    testCube.visible = false;
     $('align').classList.add('hidden');
     $('tools').classList.remove('hidden');
     return;
@@ -354,7 +346,7 @@ function setStep(s) {
   house.visible = false;
   beacon.visible = false;
   if (mode === 'home') {
-    $('msg').innerHTML = 'Před tebou by měla být barevná kostička – když není vidět, napiš. Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
+    $('msg').innerHTML = 'Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
       'Dům se postaví ulicí k tobě. ' + (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad podlahou, ať se kroužek objeví.</span>');
     $('btnMark').textContent = 'Umístit sem';
     return;
@@ -470,18 +462,8 @@ async function startAR(m) {
   setStep('A');
   session.addEventListener('end', () => location.reload());
   xrCam = renderer.xr.getCamera();
-  let first = true;
-  renderer.setAnimationLoop((t, frame) => { try { loop(t, frame); } catch (e) { lastErr = e.message; } try { diag(frame); } catch (e) { $('room').textContent = 'diag: ' + e.message; } });
+  renderer.setAnimationLoop((t, frame) => { try { loop(t, frame); } catch (e) { lastErr = e.message; } try { status(); } catch (e) { /* jen stavový řádek */ } });
   function loop(t, frame) {
-    if (frame && first) {
-      const vp = frame.getViewerPose(renderer.xr.getReferenceSpace());
-      if (vp) {
-        const m = new THREE.Matrix4().fromArray(vp.transform.matrix);
-        testCube.position.set(0, 0, -0.5).applyMatrix4(m);
-        testCube.visible = true;
-        first = false;
-      }
-    }
     if (frame && hitSource) {
       const hits = frame.getHitTestResults(hitSource);
       const was = reticle.visible;
@@ -495,7 +477,6 @@ async function startAR(m) {
     }
     if (step === 'done') updateRoom(xrCam);
     renderer.render(scene, camera);
-    calls = renderer.info.render.calls;
   }
 }
 
