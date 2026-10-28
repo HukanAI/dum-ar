@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Dům Karviná AR</title>
+<meta name="theme-color" content="#1f2a24">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root { --bg: #1f2a24; --panel: rgba(20, 26, 23, .86); --fg: #f2f4f1; --mut: #b6c0b9; --acc: #7fc29b; --warn: #f0b860; --line: rgba(255,255,255,.14); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  #ui > * { pointer-events: auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; backdrop-filter: blur(6px); }
+  #top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; }
+  #room { flex: 1; font-weight: 600; }
+  #room small { display: block; font-weight: 400; color: var(--mut); font-size: 12px; }
+  #bottom { position: absolute; left: 10px; right: 10px; bottom: max(12px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; }
+  button, select { font: inherit; color: var(--fg); background: #2d3a33; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  button.primary { background: var(--acc); color: #10241a; border: none; font-weight: 700; }
+  button.small { padding: 7px 10px; font-size: 14px; }
+  button:disabled { opacity: .45; }
+  select { width: 100%; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > .grow { flex: 1; }
+  .toggles button[aria-pressed="false"] { opacity: .5; }
+  .toggles button[aria-pressed="true"] { border-color: var(--acc); }
+  #msg { font-size: 14px; }
+  #msg b { color: var(--acc); }
+  .warn { color: var(--warn); }
+  #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: radial-gradient(circle at 50% 30%, #2c3b33, #141b17); }
+  #start .card { max-width: 440px; width: 100%; }
+  #start h1 { margin: 0 0 4px; font-size: 24px; }
+  #start p { color: var(--mut); margin: 8px 0; }
+  #start ol { padding-left: 20px; color: var(--mut); margin: 8px 0 14px; }
+  #start .row button { flex: 1; }
+  #load { color: var(--mut); font-size: 13px; margin-top: 10px; }
+  .hidden { display: none !important; }
+  #adjust { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  #adjust button { padding: 8px 4px; font-size: 13px; }
+</style>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+</head>
+<body>
+<div id="start">
+  <div class="card panel">
+    <h1>Dům Karviná – AR</h1>
+    <p>Procházka navrženým domem (v6) přímo na pozemku, ve skutečné velikosti.</p>
+    <ol>
+      <li>Na pozemku zvol dva body, které poznáš: rohy pozemku (kolíky) nebo vytyčené rohy domu.</li>
+      <li>Postav se k prvnímu, zamiř kroužek na kolík a potvrď. Totéž u druhého.</li>
+      <li>Dům se usadí. Choď normálně, i dovnitř.</li>
+    </ol>
+    <div class="row">
+      <button id="btnAR" class="primary">Spustit AR</button>
+      <button id="btnPreview">3D náhled</button>
+    </div>
+    <div id="load">Načítám model…</div>
+  </div>
+</div>
+
+<div id="ui" class="hidden">
+  <div id="top">
+    <div id="room" class="panel">—<small></small></div>
+    <button id="btnExit" class="small">Zavřít</button>
+  </div>
+  <div id="bottom">
+    <div id="align" class="panel">
+      <div id="msg"></div>
+      <div class="row" style="margin-top:8px">
+        <select id="selPt" class="grow"></select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnMark" class="primary grow" disabled>Bod A je tady</button>
+      </div>
+    </div>
+    <div id="tools" class="panel hidden">
+      <div class="row toggles">
+        <button class="small" data-layer="dum" aria-pressed="true">Dům</button>
+        <button class="small" data-layer="strecha" aria-pressed="true">Střecha</button>
+        <button class="small" data-layer="nabytek" aria-pressed="true">Nábytek</button>
+        <button class="small" data-layer="okoli" aria-pressed="true">Zahrada</button>
+        <button class="small" id="btnGhost" aria-pressed="false">Průhledné zdi</button>
+      </div>
+      <div id="adjust" style="margin-top:8px">
+        <button data-adj="up">Podlaha ▲ 5 cm</button>
+        <button data-adj="down">Podlaha ▼ 5 cm</button>
+        <button data-adj="ccw">Otočit ↺ 0,5°</button>
+        <button data-adj="cw">Otočit ↻ 0,5°</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div id="info" class="grow" style="font-size:13px;color:var(--mut)"></div>
+        <button id="btnRealign" class="small">Znovu usadit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from './lib/GLTFLoader.js';
+import { DRACOLoader } from './lib/DRACOLoader.js';
+import { OrbitControls } from './lib/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const D = await (await fetch('data.json')).json();
+
+// souřadnice návrhu (x podél ulice, y dozadu, z nahoru) -> three.js (Y nahoru)
+const L = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
+const F = (n, d = 2) => n.toFixed(d).replace('.', ',');
+
+// terén DMR 5G (m n. m.) bilineárně, výška vůči podlaze 0
+function dmr(x, y) {
+  const t = D.terrain;
+  const fx = Math.min(Math.max((x - t.x0) / t.step, 0), t.nx - 1.001);
+  const fy = Math.min(Math.max((y - t.y0) / t.step, 0), t.ny - 1.001);
+  const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j;
+  const z = (a, b) => t.z[b * t.nx + a];
+  return (z(i, j) * (1 - u) + z(i + 1, j) * u) * (1 - v) + (z(i, j + 1) * (1 - u) + z(i + 1, j + 1) * u) * v;
+}
+const rel = (x, y) => dmr(x, y) - D.floor;
+
+// ---------------------------------------------------------------- scéna
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.localClippingEnabled = true;
+const cut = new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.62);   // bez střechy: řez domem pod stropem (vidět do místností)
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 400);
+scene.add(new THREE.HemisphereLight(0xeef3ff, 0x6b6250, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+sun.position.set(-20, 40, 25);       // zhruba od jihu (ulice) a západu
+scene.add(sun);
+
+const house = new THREE.Group();      // vše v souřadnicích návrhu; v AR se celé posune a natočí
+scene.add(house);
+const layers = {};
+
+// hranice pozemku a body pro usazení leží na terénu podle DMR
+const site = new THREE.Group();
+house.add(site);
+{
+  const pts = [];
+  const ring = D.parcel;
+  for (let k = 0; k < ring.length - 1; k++) {
+    const [ax, ay] = ring[k], [bx, by] = ring[k + 1];
+    const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 1.0);
+    for (let s = 0; s <= n; s++) {
+      const x = ax + (bx - ax) * s / n, y = ay + (by - ay) * s / n;
+      pts.push(L(x, y, rel(x, y) + 0.03));
+    }
+  }
+  site.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xff5a3c })));
+  const postG = new THREE.CylinderGeometry(0.04, 0.04, 0.6, 10);
+  const postM = new THREE.MeshLambertMaterial({ color: 0xff5a3c });
+  for (const p of D.points) {
+    const m = new THREE.Mesh(postG, postM);
+    m.position.copy(L(p.xy[0], p.xy[1], rel(p.xy[0], p.xy[1]) + 0.3));
+    site.add(m);
+  }
+}
+
+// terén jen pro 3D náhled (v AR je skutečná zem)
+const terrainMesh = (() => {
+  const t = D.terrain, g = new THREE.BufferGeometry(), pos = [], idx = [];
+  for (let j = 0; j < t.ny; j++) for (let i = 0; i < t.nx; i++) {
+    const x = t.x0 + i * t.step, y = t.y0 + j * t.step;
+    pos.push(x, t.z[j * t.nx + i] - D.floor, -y);
+  }
+  for (let j = 0; j < t.ny - 1; j++) for (let i = 0; i < t.nx - 1; i++) {
+    const a = j * t.nx + i, b = a + 1, c = a + t.nx, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x7d9a62, side: THREE.DoubleSide }));
+})();
+house.add(terrainMesh);
+
+// ---------------------------------------------------------------- model
+const draco = new DRACOLoader().setDecoderPath('./lib/draco/');
+const loader = new GLTFLoader().setDRACOLoader(draco);
+const dumMats = new Set();
+async function loadAll() {
+  const names = ['dum', 'strecha', 'nabytek', 'okoli'];
+  let done = 0;
+  await Promise.all(names.map(async (n) => {
+    const g = await loader.loadAsync(`models/${n}.glb`);
+    g.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const m = o.material;
+      if (m.transparent) m.depthWrite = false;
+      if (n === 'dum') dumMats.add(m);
+    });
+    layers[n] = g.scene;
+    house.add(g.scene);
+    $('load').textContent = `Načítám model… ${++done}/${names.length}`;
+  }));
+  $('load').textContent = `Model v6 načten (stav ${D.date ? D.date.split('-').reverse().join('. ') : ''}).`;
+}
+const loading = loadAll().catch((e) => { $('load').innerHTML = `<span class="warn">Model se nenačetl: ${e.message}</span>`; });
+
+// ---------------------------------------------------------------- místnost, kde stojím
+function inPoly(x, y, poly) {
+  let ins = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins;
+  }
+  return ins;
+}
+const tmp = new THREE.Vector3();
+let lastRoom = 0;
+function updateRoom(cam) {
+  cut.constant = house.position.y + 2.62;
+  const now = performance.now();
+  if (now - lastRoom < 300) return;
+  lastRoom = now;
+  cam.getWorldPosition(tmp);
+  house.worldToLocal(tmp);
+  const x = tmp.x, y = -tmp.z, h = tmp.y;
+  const r = D.rooms.find((r) => inPoly(x, y, r.poly));
+  const where = r ? `${r.id} ${r.name}` : (inPoly(x, y, D.outline) ? 'v domě' : (inPoly(x, y, D.parcel) ? 'na zahradě' : 'mimo pozemek'));
+  $('room').innerHTML = `${where}<small>oči ${F(h)} m nad podlahou · x ${F(x, 1)} y ${F(y, 1)}</small>`;
+}
+
+// ---------------------------------------------------------------- přepínače
+for (const b of document.querySelectorAll('[data-layer]')) {
+  b.onclick = () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', on);
+    if (layers[b.dataset.layer]) layers[b.dataset.layer].visible = on;
+    if (b.dataset.layer === 'strecha') for (const m of dumMats) { m.clippingPlanes = on ? [] : [cut]; m.needsUpdate = true; }
+  };
+}
+$('btnGhost').onclick = () => {
+  const on = $('btnGhost').getAttribute('aria-pressed') !== 'true';
+  $('btnGhost').setAttribute('aria-pressed', on);
+  for (const m of dumMats) {
+    if (m.userData.op === undefined) m.userData.op = { o: m.opacity, t: m.transparent, d: m.depthWrite };
+    const o = m.userData.op;
+    m.opacity = on ? Math.min(o.o, 0.35) : o.o;
+    m.transparent = on || o.t;
+    m.depthWrite = on ? false : o.d;
+    m.needsUpdate = true;
+  }
+};
+
+// ---------------------------------------------------------------- 3D náhled (bez AR)
+let controls = null;
+function preview() {
+  $('start').classList.add('hidden');
+  $('ui').classList.remove('hidden');
+  $('align').classList.add('hidden');
+  $('tools').classList.remove('hidden');
+  $('btnRealign').classList.add('hidden');
+  $('info').textContent = 'Náhled: tažením otáčíš, dvěma prsty posouváš a přibližuješ.';
+  scene.background = new THREE.Color(0xcfdde6);
+  terrainMesh.visible = true;
+  house.position.set(0, 0, 0);
+  house.rotation.set(0, 0, 0);
+  camera.position.set(-14, 22, 18);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(7, 0, -8);
+  controls.update();
+  window.__ar = { camera, controls, layers };
+  renderer.setAnimationLoop(() => { controls.update(); updateRoom(camera); renderer.render(scene, camera); });
+}
+
+// ---------------------------------------------------------------- AR
+const reticle = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.09, 32).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x7fc29b }));
+reticle.add(new THREE.Mesh(new THREE.CircleGeometry(0.012, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff })));
+reticle.matrixAutoUpdate = false;
+reticle.visible = false;
+scene.add(reticle);
+
+let hitSource = null, step = 'A', marks = {}, adj = { dh: 0, dth: 0 }, fit = null;
+for (const p of D.points) $('selPt').add(new Option(p.name, p.id));
+$('selPt').value = 'p_jz';
+
+function setStep(s) {
+  step = s;
+  const label = s === 'A' ? 'první' : 'druhý';
+  if (s === 'done') {
+    $('align').classList.add('hidden');
+    $('tools').classList.remove('hidden');
+    return;
+  }
+  $('align').classList.remove('hidden');
+  $('tools').classList.add('hidden');
+  $('msg').innerHTML = `Vyber <b>${label} bod</b>, dojdi k němu a zamiř kroužek přesně na kolík. ` +
+    (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad zemí, ať se kroužek objeví.</span>');
+  $('btnMark').textContent = s === 'A' ? 'Bod A je tady' : 'Bod B je tady';
+  if (s === 'B' && $('selPt').value === marks.A.id) $('selPt').value = marks.A.id === 'p_jv' ? 'p_jz' : 'p_jv';
+  house.visible = false;
+}
+
+function place() {
+  const A = marks.A, B = marks.B;
+  const pa = D.points.find((p) => p.id === A.id).xy, pb = D.points.find((p) => p.id === B.id).xy;
+  const la = L(pa[0], pa[1]), lb = L(pb[0], pb[1]);
+  const dl = lb.clone().sub(la), dw = B.pos.clone().sub(A.pos);
+  dl.y = 0; dw.y = 0;
+  const th = Math.atan2(dw.x, dw.z) - Math.atan2(dl.x, dl.z) + adj.dth;
+  // výška podlahy: skutečná zem u bodu + (podlaha − terén DMR v tom bodě), průměr z obou bodů
+  const fy = ((A.pos.y - rel(pa[0], pa[1])) + (B.pos.y - rel(pb[0], pb[1]))) / 2 + adj.dh;
+  const midW = A.pos.clone().add(B.pos).multiplyScalar(0.5);
+  const midL = la.clone().add(lb).multiplyScalar(0.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), th);
+  house.rotation.set(0, th, 0);
+  house.position.set(midW.x - midL.x, fy, midW.z - midL.z);
+  house.visible = true;
+  const meas = dw.length(), plan = dl.length(), err = meas - plan;
+  fit = { meas, plan, err };
+  const q = Math.abs(err) < 0.25 ? 'dobře' : (Math.abs(err) < 0.6 ? '<span class="warn">ujde</span>' : '<span class="warn">nesedí – usaď znovu</span>');
+  $('info').innerHTML = `Vzdálenost bodů: naměřeno ${F(meas)} m, podle plánu ${F(plan)} m (${err >= 0 ? '+' : ''}${F(err)} m, ${q}). ` +
+    `Podlaha ${F(fy - A.pos.y)} m nad bodem A.`;
+}
+
+$('btnMark').onclick = () => {
+  if (!reticle.visible) return;
+  const pos = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+  if (step === 'A') { marks.A = { id: $('selPt').value, pos }; setStep('B'); }
+  else if (step === 'B') {
+    if ($('selPt').value === marks.A.id) { $('msg').innerHTML = '<span class="warn">Druhý bod musí být jiný než první.</span>'; return; }
+    marks.B = { id: $('selPt').value, pos };
+    adj = { dh: 0, dth: 0 };
+    place();
+    setStep('done');
+  }
+};
+$('btnRealign').onclick = () => { marks = {}; setStep('A'); };
+for (const b of document.querySelectorAll('[data-adj]')) {
+  b.onclick = () => {
+    const k = b.dataset.adj;
+    if (k === 'up') adj.dh += 0.05;
+    if (k === 'down') adj.dh -= 0.05;
+    if (k === 'ccw') adj.dth += Math.PI / 360;
+    if (k === 'cw') adj.dth -= Math.PI / 360;
+    if (marks.B) place();
+  };
+}
+
+async function startAR() {
+  if (!navigator.xr || !(await navigator.xr.isSessionSupported('immersive-ar').catch(() => false))) {
+    $('load').innerHTML = '<span class="warn">Tento prohlížeč AR neumí. Otevři stránku v Chrome na Androidu (s podporou ARCore / „Google Play Services for AR“). Zatím můžeš použít 3D náhled.</span>';
+    return;
+  }
+  await loading;
+  const session = await navigator.xr.requestSession('immersive-ar', {
+    requiredFeatures: ['hit-test'],
+    optionalFeatures: ['dom-overlay'],
+    domOverlay: { root: $('ui') },
+  });
+  renderer.xr.setReferenceSpaceType('local');
+  await renderer.xr.setSession(session);
+  const viewer = await session.requestReferenceSpace('viewer');
+  hitSource = await session.requestHitTestSource({ space: viewer });
+  $('start').classList.add('hidden');
+  $('ui').classList.remove('hidden');
+  $('btnRealign').classList.remove('hidden');
+  scene.background = null;
+  terrainMesh.visible = false;
+  marks = {};
+  setStep('A');
+  session.addEventListener('end', () => location.reload());
+  const xrCam = renderer.xr.getCamera();
+  renderer.setAnimationLoop((t, frame) => {
+    if (frame && hitSource) {
+      const hits = frame.getHitTestResults(hitSource);
+      const was = reticle.visible;
+      if (hits.length) {
+        const pose = hits[0].getPose(renderer.xr.getReferenceSpace());
+        reticle.visible = true;
+        reticle.matrix.fromArray(pose.transform.matrix);
+      } else reticle.visible = false;
+      $('btnMark').disabled = !reticle.visible;
+      if (was !== reticle.visible && step !== 'done') setStep(step);
+    }
+    if (step === 'done') updateRoom(xrCam);
+    renderer.render(scene, camera);
+  });
+}
+
+$('btnAR').onclick = () => startAR().catch((e) => { $('load').innerHTML = `<span class="warn">AR se nespustilo: ${e.message}</span>`; });
+$('btnPreview').onclick = () => loading.then(preview);
+$('btnExit').onclick = () => { const s = renderer.xr.getSession(); s ? s.end() : location.reload(); };
+addEventListener('resize', () => {
+  if (renderer.xr.isPresenting) return;
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
