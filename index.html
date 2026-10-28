@@ -302,7 +302,12 @@ scene.add(beacon);
 const testCube = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshNormalMaterial());
 testCube.visible = false;
 scene.add(testCube);
-let diagT = 0, calls = 0;
+let diagT = 0, calls = 0, lastErr = '';
+// chyby vykreslování zobrazit na displeji (konzole v telefonu není vidět)
+const _ce = console.error.bind(console);
+console.error = (...a) => { lastErr = a.map(String).join(' ').slice(0, 160); _ce(...a); };
+addEventListener('error', (e) => { lastErr = (e.message || String(e)).slice(0, 160); });
+addEventListener('unhandledrejection', (e) => { lastErr = String(e.reason).slice(0, 160); });
 const uaShort = (navigator.userAgent.match(/Android [\d.]+; ([^;)]+)/) || [, ''])[1] + ' · Chrome ' +
   ((navigator.userAgent.match(/Chrome\/(\d+)/) || [, '?'])[1]);
 function diag(frame) {
@@ -315,7 +320,9 @@ function diag(frame) {
     xrCam.getWorldPosition(c);
     d = ` (${F(p.distanceTo(c))} m, ${F(c.y - p.y)} m pod telefonem)`;
   }
-  const line = `kroužek ${reticle.visible ? 'ano' + d : 'ne'} · vykresleno ${calls} · ${uaShort}`;
+  const gl = renderer.getContext(), lay = renderer.xr.getSession() && renderer.xr.getSession().renderState.baseLayer;
+  const line = `kroužek ${reticle.visible ? 'ano' + d : 'ne'} · vykresleno ${calls} · vrstva ${lay ? lay.framebufferWidth + '×' + lay.framebufferHeight : (renderer.xr.getSession() && renderer.xr.getSession().renderState.layers ? 'layers' : 'žádná')}` +
+    ` · ${gl.isContextLost() ? 'GL ZTRACEN' : 'GL ok'} · ${uaShort}` + (lastErr ? ` · CHYBA: ${lastErr}` : '');
   if (step !== 'done') $('room').innerHTML = `Diagnostika<small>${line}</small>`;
   else $('diag').textContent = line;
 }
@@ -464,7 +471,8 @@ async function startAR(m) {
   session.addEventListener('end', () => location.reload());
   xrCam = renderer.xr.getCamera();
   let first = true;
-  renderer.setAnimationLoop((t, frame) => {
+  renderer.setAnimationLoop((t, frame) => { try { loop(t, frame); } catch (e) { lastErr = e.message; } try { diag(frame); } catch (e) { $('room').textContent = 'diag: ' + e.message; } });
+  function loop(t, frame) {
     if (frame && first) {
       const vp = frame.getViewerPose(renderer.xr.getReferenceSpace());
       if (vp) {
@@ -488,8 +496,7 @@ async function startAR(m) {
     if (step === 'done') updateRoom(xrCam);
     renderer.render(scene, camera);
     calls = renderer.info.render.calls;
-    diag(frame);
-  });
+  }
 }
 
 $('btnHome').onclick = () => startAR('home').catch((e) => { $('load').innerHTML = `<span class="warn">AR se nespustilo: ${e.message}</span>`; });
