@@ -54,10 +54,16 @@
       <li>Postav se k prvnímu, zamiř kroužek na kolík a potvrď. Totéž u druhého.</li>
       <li>Dům se usadí. Choď normálně, i dovnitř.</li>
     </ol>
+    <p><b>Doma</b> stačí „Vyzkoušet doma“ a ťuknout na podlahu: maketa 1:25 na stůl nebo dům ve skutečné velikosti před tebou.</p>
     <div class="row">
-      <button id="btnAR" class="primary">Spustit AR</button>
-      <button id="btnPreview">3D náhled</button>
+      <button id="btnAR" class="primary">AR na pozemku</button>
+      <button id="btnHome" class="primary">Vyzkoušet doma</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnPreview">3D náhled</button>
+      <button id="btnInstall" class="hidden">Nainstalovat aplikaci</button>
+    </div>
+    <div id="env" class="hidden" style="margin-top:10px;font-size:13px"></div>
     <div id="load">Načítám model…</div>
   </div>
 </div>
@@ -220,7 +226,7 @@ function inPoly(x, y, poly) {
 const tmp = new THREE.Vector3();
 let lastRoom = 0;
 function updateRoom(cam) {
-  cut.constant = house.position.y + 2.62;
+  cut.constant = house.position.y + 2.62 * house.scale.y;
   const now = performance.now();
   if (now - lastRoom < 300) return;
   lastRoom = now;
@@ -284,8 +290,18 @@ reticle.visible = false;
 scene.add(reticle);
 
 let hitSource = null, step = 'A', marks = {}, adj = { dh: 0, dth: 0 }, fit = null;
-for (const p of D.points) $('selPt').add(new Option(p.name, p.id));
-$('selPt').value = 'p_jz';
+let mode = 'site', homeMark = null, xrCam = null;      // mode: 'site' = pozemek (2 body), 'home' = zkouška doma (1 ťuknutí)
+const HOME = {
+  m25: { name: 'Maketa 1:25 – na stůl nebo podlahu', s: 1 / 25, xy: [4.0, 14.0] },     // střed domu a zahrady
+  m1: { name: 'Skutečná velikost – stojím před vchodem', s: 1, xy: [8.8, -2.3] },      // 1,75 m před vchodovými dveřmi
+};
+function fillSelect() {
+  $('selPt').innerHTML = '';
+  if (mode === 'home') for (const [k, v] of Object.entries(HOME)) $('selPt').add(new Option(v.name, k));
+  else for (const p of D.points) $('selPt').add(new Option(p.name, p.id));
+  $('selPt').value = mode === 'home' ? 'm25' : 'p_jz';
+}
+fillSelect();
 
 function setStep(s) {
   step = s;
@@ -297,11 +313,31 @@ function setStep(s) {
   }
   $('align').classList.remove('hidden');
   $('tools').classList.add('hidden');
+  house.visible = false;
+  if (mode === 'home') {
+    $('msg').innerHTML = 'Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
+      'Dům se postaví ulicí k tobě. ' + (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad podlahou, ať se kroužek objeví.</span>');
+    $('btnMark').textContent = 'Umístit sem';
+    return;
+  }
   $('msg').innerHTML = `Vyber <b>${label} bod</b>, dojdi k němu a zamiř kroužek přesně na kolík. ` +
     (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad zemí, ať se kroužek objeví.</span>');
   $('btnMark').textContent = s === 'A' ? 'Bod A je tady' : 'Bod B je tady';
   if (s === 'B' && $('selPt').value === marks.A.id) $('selPt').value = marks.A.id === 'p_jv' ? 'p_jz' : 'p_jv';
   house.visible = false;
+}
+
+function placeHome() {
+  const h = HOME[homeMark.kind], s = h.s;
+  const th = Math.atan2(homeMark.f.x, homeMark.f.z) - Math.PI + adj.dth;   // osa +y návrhu (do zahrady) míří ode mě
+  const a = L(h.xy[0], h.xy[1]).multiplyScalar(s).applyAxisAngle(new THREE.Vector3(0, 1, 0), th);
+  house.scale.setScalar(s);
+  house.rotation.set(0, th, 0);
+  house.position.set(homeMark.pos.x - a.x, homeMark.pos.y + adj.dh * s, homeMark.pos.z - a.z);
+  house.visible = true;
+  $('info').innerHTML = s === 1
+    ? 'Zkouška doma ve skutečné velikosti: místo s kroužkem je 1,75 m před vchodovými dveřmi, dům stojí před tebou.'
+    : 'Zkouška doma: maketa 1:25 (celý pozemek asi 1,2 × 1,7 m). Vypni střechu a podívej se do místností.';
 }
 
 function place() {
@@ -328,6 +364,17 @@ function place() {
 $('btnMark').onclick = () => {
   if (!reticle.visible) return;
   const pos = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+  if (mode === 'home') {
+    const f = new THREE.Vector3();
+    xrCam.getWorldDirection(f);
+    f.y = 0;
+    if (f.lengthSq() < 1e-6) f.set(0, 0, -1);
+    homeMark = { kind: $('selPt').value, pos, f: f.normalize() };
+    adj = { dh: 0, dth: 0 };
+    placeHome();
+    setStep('done');
+    return;
+  }
   if (step === 'A') { marks.A = { id: $('selPt').value, pos }; setStep('B'); }
   else if (step === 'B') {
     if ($('selPt').value === marks.A.id) { $('msg').innerHTML = '<span class="warn">Druhý bod musí být jiný než první.</span>'; return; }
@@ -337,7 +384,7 @@ $('btnMark').onclick = () => {
     setStep('done');
   }
 };
-$('btnRealign').onclick = () => { marks = {}; setStep('A'); };
+$('btnRealign').onclick = () => { marks = {}; homeMark = null; setStep('A'); };
 for (const b of document.querySelectorAll('[data-adj]')) {
   b.onclick = () => {
     const k = b.dataset.adj;
@@ -345,11 +392,14 @@ for (const b of document.querySelectorAll('[data-adj]')) {
     if (k === 'down') adj.dh -= 0.05;
     if (k === 'ccw') adj.dth += Math.PI / 360;
     if (k === 'cw') adj.dth -= Math.PI / 360;
-    if (marks.B) place();
+    if (mode === 'home' && homeMark) placeHome();
+    else if (marks.B) place();
   };
 }
 
-async function startAR() {
+async function startAR(m) {
+  mode = m;
+  fillSelect();
   if (!navigator.xr || !(await navigator.xr.isSessionSupported('immersive-ar').catch(() => false))) {
     $('load').innerHTML = '<span class="warn">Tento prohlížeč AR neumí. Otevři stránku v Chrome na Androidu (s podporou ARCore / „Google Play Services for AR“). Zatím můžeš použít 3D náhled.</span>';
     return;
@@ -372,7 +422,7 @@ async function startAR() {
   marks = {};
   setStep('A');
   session.addEventListener('end', () => location.reload());
-  const xrCam = renderer.xr.getCamera();
+  xrCam = renderer.xr.getCamera();
   renderer.setAnimationLoop((t, frame) => {
     if (frame && hitSource) {
       const hits = frame.getHitTestResults(hitSource);
@@ -390,7 +440,8 @@ async function startAR() {
   });
 }
 
-$('btnAR').onclick = () => startAR().catch((e) => { $('load').innerHTML = `<span class="warn">AR se nespustilo: ${e.message}</span>`; });
+$('btnHome').onclick = () => startAR('home').catch((e) => { $('load').innerHTML = `<span class="warn">AR se nespustilo: ${e.message}</span>`; });
+$('btnAR').onclick = () => startAR('site').catch((e) => { $('load').innerHTML = `<span class="warn">AR se nespustilo: ${e.message}</span>`; });
 $('btnPreview').onclick = () => loading.then(preview);
 $('btnExit').onclick = () => { const s = renderer.xr.getSession(); s ? s.end() : location.reload(); };
 addEventListener('resize', () => {
@@ -399,6 +450,27 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+// instalace na plochu (Chrome pošle beforeinstallprompt, když stránka splňuje podmínky)
+let installEvt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('btnInstall').classList.remove('hidden'); });
+$('btnInstall').onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  await installEvt.userChoice;
+  installEvt = null;
+  $('btnInstall').classList.add('hidden');
+};
+addEventListener('appinstalled', () => { $('env').classList.remove('hidden'); $('env').innerHTML = 'Aplikace je nainstalovaná – najdeš ji na ploše jako „Dům AR“.'; });
+{
+  const ua = navigator.userAgent, standalone = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+  const inApp = /; wv\)|FBAN|FBAV|Instagram|Messenger|Line\/|GSA\//.test(ua);
+  const chrome = /Chrome\/\d+/.test(ua) && !/EdgA|SamsungBrowser|OPR|Firefox/.test(ua);
+  let tip = '';
+  if (inApp) tip = '<span class="warn">Stránka je otevřená ve vestavěném prohlížeči jiné aplikace. Zkopíruj odkaz a otevři ho v <b>Chrome</b> – jen tam jde instalace i AR.</span>';
+  else if (/Android/.test(ua) && !chrome) tip = '<span class="warn">Pro AR a instalaci otevři stránku v <b>Chrome</b>.</span>';
+  else if (/Android/.test(ua) && !standalone) tip = 'Instalace: tlačítko „Nainstalovat aplikaci“, nebo v Chrome menu ⋮ → „Přidat na plochu“ → <b>Instalovat</b>.';
+  if (tip) { $('env').classList.remove('hidden'); $('env').innerHTML = tip; }
+}
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
