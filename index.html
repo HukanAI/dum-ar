@@ -43,7 +43,7 @@
   #adjust { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   #adjust button { padding: 8px 4px; font-size: 13px; }
 </style>
-<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js?v=7" } }</script>
 </head>
 <body>
 <div id="start">
@@ -108,9 +108,9 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from './lib/GLTFLoader.js';
-import { DRACOLoader } from './lib/DRACOLoader.js';
-import { OrbitControls } from './lib/OrbitControls.js';
+import { GLTFLoader } from './lib/GLTFLoader.js?v=7';
+import { DRACOLoader } from './lib/DRACOLoader.js?v=7';
+import { OrbitControls } from './lib/OrbitControls.js?v=7';
 
 const $ = (id) => document.getElementById(id);
 const D = await (await fetch('data.json')).json();
@@ -322,7 +322,7 @@ function diag(frame) {
   }
   const gl = renderer.getContext(), lay = renderer.xr.getSession() && renderer.xr.getSession().renderState.baseLayer;
   const line = `kroužek ${reticle.visible ? 'ano' + d : 'ne'} · vykresleno ${calls} · vrstva ${lay ? lay.framebufferWidth + '×' + lay.framebufferHeight : (renderer.xr.getSession() && renderer.xr.getSession().renderState.layers ? 'layers' : 'žádná')}` +
-    ` · ${gl.isContextLost() ? 'GL ZTRACEN' : 'GL ok'} · ${uaShort}` + (lastErr ? ` · CHYBA: ${lastErr}` : '');
+    ` · ${gl.isContextLost() ? 'GL ZTRACEN' : 'GL ok'} · oprava ${globalThis.DUM_AR_FIX ? 'ano' : 'NE'} · ${uaShort}` + (lastErr ? ` · CHYBA: ${lastErr}` : '');
   if (step !== 'done') $('room').innerHTML = `Diagnostika<small>${line}</small>`;
   else $('diag').textContent = line;
 }
