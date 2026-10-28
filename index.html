@@ -236,7 +236,8 @@ function updateRoom(cam) {
   const x = tmp.x, y = -tmp.z, h = tmp.y;
   const r = D.rooms.find((r) => inPoly(x, y, r.poly));
   const where = r ? `${r.id} ${r.name}` : (inPoly(x, y, D.outline) ? 'v domě' : (inPoly(x, y, D.parcel) ? 'na zahradě' : 'mimo pozemek'));
-  $('room').innerHTML = `${where}<small>oči ${F(h)} m nad podlahou · x ${F(x, 1)} y ${F(y, 1)}</small>`;
+  const s = house.scale.y;
+  $('room').innerHTML = `${where}<small>telefon ${F(h * s)} m nad podlahou${s < 1 ? ' makety' : ''} · x ${F(x, 1)} y ${F(y, 1)}</small>`;
 }
 
 // ---------------------------------------------------------------- přepínače
@@ -289,11 +290,18 @@ reticle.add(new THREE.Mesh(new THREE.CircleGeometry(0.012, 16).rotateX(-Math.PI 
 reticle.matrixAutoUpdate = false;
 reticle.visible = false;
 scene.add(reticle);
+// zelený sloupek nad místem, kam se dům položil (aby šel vždycky najít)
+const beacon = new THREE.Group();
+beacon.add(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 2, 8).translate(0, 1, 0),
+  new THREE.MeshBasicMaterial({ color: 0x7fc29b, transparent: true, opacity: 0.8 })));
+beacon.add(new THREE.Mesh(new THREE.SphereGeometry(0.04, 16, 8).translate(0, 2, 0), new THREE.MeshBasicMaterial({ color: 0x7fc29b })));
+beacon.visible = false;
+scene.add(beacon);
 
 let hitSource = null, step = 'A', marks = {}, adj = { dh: 0, dth: 0 }, fit = null;
 let mode = 'site', homeMark = null, xrCam = null;      // mode: 'site' = pozemek (2 body), 'home' = zkouška doma (1 ťuknutí)
 const HOME = {
-  m25: { name: 'Maketa 1:25 – na stůl nebo podlahu', s: 1 / 25, xy: [4.0, 14.0] },     // střed domu a zahrady
+  m25: { name: 'Maketa 1:25 – na stůl nebo podlahu', s: 1 / 25, xy: [4.0, -8.0] },     // kroužek = okraj u ulice, pozemek vede ode mě
   m1: { name: 'Skutečná velikost – stojím před vchodem', s: 1, xy: [8.8, -2.3] },      // 1,75 m před vchodovými dveřmi
 };
 function fillSelect() {
@@ -315,6 +323,7 @@ function setStep(s) {
   $('align').classList.remove('hidden');
   $('tools').classList.add('hidden');
   house.visible = false;
+  beacon.visible = false;
   if (mode === 'home') {
     $('msg').innerHTML = 'Zkouška doma: vyber velikost, zamiř kroužek na podlahu (maketu i na stůl) a ťukni <b>Umístit</b>. ' +
       'Dům se postaví ulicí k tobě. ' + (reticle.visible ? '' : '<span class="warn">Pomalu přejížděj telefonem nad podlahou, ať se kroužek objeví.</span>');
@@ -336,9 +345,13 @@ function placeHome() {
   house.rotation.set(0, th, 0);
   house.position.set(homeMark.pos.x - a.x, homeMark.pos.y + adj.dh * s, homeMark.pos.z - a.z);
   house.visible = true;
-  $('info').innerHTML = s === 1
-    ? 'Zkouška doma ve skutečné velikosti: místo s kroužkem je 1,75 m před vchodovými dveřmi, dům stojí před tebou.'
-    : 'Zkouška doma: maketa 1:25 (celý pozemek asi 1,2 × 1,7 m). Vypni střechu a podívej se do místností.';
+  beacon.position.copy(homeMark.pos);
+  beacon.visible = true;
+  const n = Object.keys(layers).length;
+  $('info').innerHTML = (s === 1
+    ? 'Zkouška doma ve skutečné velikosti: zelený sloupek je 1,75 m před vchodovými dveřmi, dům stojí za ním.'
+    : 'Maketa 1:25 leží na podlaze od zeleného sloupku dál od tebe (asi 1,2 × 1,7 m). Vypni střechu a podívej se do místností.') +
+    (n < 4 ? ` <span class="warn">Načteno jen ${n}/4 částí modelu.</span>` : '');
 }
 
 function place() {
